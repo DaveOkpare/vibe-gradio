@@ -27,18 +27,26 @@ def chat(message, history):
         return "Please ask about Python or JavaScript.", None
 
 with gr.Blocks() as demo:
-    code = gr.Code(render=False)
+    frame = gr.HTML(
+        """
+<iframe src=
+"https://media.geeksforgeeks.org/wp-content/uploads/20240206111438/uni2.html"
+            height="370"
+            width="400">
+    </iframe>    """,
+        render=False,
+    )
     with gr.Row():
         with gr.Column():
             gr.Markdown("<center><h1>Write Python or JavaScript</h1></center>")
             gr.ChatInterface(
                 chat,
                 examples=["Python", "JavaScript"],
-                additional_outputs=[code],
+                additional_outputs=[frame],
                 type="messages"
             )
         with gr.Column():
             gr.Markdown("<center><h1>Code Artifacts</h1></center>")
-            code.render()
+            frame.render()
 
 demo.launch()

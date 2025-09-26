@@ -45,7 +45,7 @@ def chat(message, history):
     elif "javascript" in message.lower():
         return "Type Python or JavaScript to see the code."
     else:
-        return "Please ask about Python or JavaScript.", None
+        return "Please ask about Python or JavaScript.", gr.update()
 
 
 with gr.Blocks() as demo:

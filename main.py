@@ -1,22 +1,42 @@
+import base64
 import gradio as gr
 
-python_code = """
-def fib(n):
-    if n <= 0:
-        return 0
-    elif n == 1:
-        return 1
-    else:
-        return fib(n-1) + fib(n-2)
+# Initial inner Gradio-Lite app (editable at runtime in the UI)
+INITIAL_INNER_PY = """
+import gradio as gr
+
+def greet(name):
+    return "Hello, " + name + "!!!"
+
+gr.Interface(greet, 'textbox', 'textbox').launch()
 """
 
-js_code = """
-function fib(n) {
-    if (n <= 0) return 0;
-    if (n === 1) return 1;
-    return fib(n - 1) + fib(n - 2);
-}
-"""
+
+def build_srcdoc(py_code: str) -> str:
+    return f"""<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script type="module" crossorigin src="https://cdn.jsdelivr.net/npm/@gradio/lite/dist/lite.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gradio/lite/dist/lite.css" />
+  </head>
+  <body>
+    <gradio-lite>
+{py_code}
+    </gradio-lite>
+  </body>
+</html>"""
+
+
+def make_iframe_html(py_code: str, height: int = 650) -> str:
+    srcdoc = build_srcdoc(py_code)
+    b64 = base64.b64encode(srcdoc.encode("utf-8")).decode()
+    return (
+        f'<iframe loading="lazy" referrerpolicy="no-referrer" '
+        f'sandbox="allow-scripts allow-same-origin" '
+        f'style="width:100%;height:{height}px;border:0" '
+        f'src="data:text/html;base64,{b64}"></iframe>'
+    )
 
 
 def chat(message, history):
@@ -34,12 +54,7 @@ def chat(message, history):
 
 with gr.Blocks() as demo:
     frame = gr.HTML(
-        """
-<iframe src=
-"https://media.geeksforgeeks.org/wp-content/uploads/20240206111438/uni2.html"
-            height="370"
-            width="400">
-    </iframe>    """,
+        make_iframe_html(INITIAL_INNER_PY),
         render=False,
     )
     with gr.Row():

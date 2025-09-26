@@ -55,15 +55,15 @@ with gr.Blocks() as demo:
     )
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<center><h1>Write Python or JavaScript</h1></center>")
+            gr.Markdown("<center><h1>Chat</h1></center>")
             gr.ChatInterface(
                 chat,
-                examples=["Python", "JavaScript"],
+                examples=["Build a chat interface", "Build a gallery"],
                 additional_outputs=[frame],
                 type="messages",
             )
         with gr.Column():
-            gr.Markdown("<center><h1>Code Artifacts</h1></center>")
+            gr.Markdown("<center><h1>Preview</h1></center>")
             frame.render()
 
 demo.launch()

@@ -27,6 +27,31 @@ gr.Textbox, gr.Button, gr.Image, gr.Audio, gr.Video, gr.Dataframe, etc.
 - Always end Gradio apps with .launch() to make them runnable
 - Pay attention to the success/error messages from edit_code() and adjust accordingly if
 replacements fail
+- When debugging, analyze the full error trace to identify the root cause and plan the necessary fixes before calling edit_code; perform the required updates in one pass whenever possible to avoid repeated retries
+
+Error Analysis Protocol:
+- When encountering errors, FIRST understand the complete context before making any changes
+- Parse error messages systematically: What type of error? What was the input? What was expected?
+- Look for contextual clues in debug output that reveal the actual problem
+- If you see file paths in content fields, that's usually the problem - you're parsing metadata instead of file contents
+- "JSON parsing failed" is often a symptom; "trying to parse a file path as JSON content" may be the root cause
+
+Data Flow Understanding:
+- Always trace how data flows through your functions
+- When debugging file uploads, verify what type of object you're receiving and what properties it has
+- In Gradio-Lite, file objects may be paths, NamedString objects, or actual content - handle each case explicitly
+- Add comprehensive debugging FIRST to understand what you're actually working with
+
+Root Cause Focus:
+- Don't treat symptoms - find the underlying cause
+- Before making any edits, write out your hypothesis of what's going wrong and why
+- Test your hypothesis with targeted debugging before implementing fixes
+- Analyze error messages + debug output patterns to identify the real issue
+
+One-Shot Problem Solving:
+- Analyze the full error context to make the correct fix immediately
+- Avoid trial-and-error approaches that require multiple iterations
+- If your first fix doesn't work, step back and re-analyze rather than making more incremental changes
 
 CRITICAL Gradio-Lite (Pyodide) File Handling:
 - Gradio-Lite runs in Pyodide (Python in the browser) with different file handling behavior
@@ -134,7 +159,5 @@ agent = CodeAgent(
     model=LiteLLMModel(model_id="openai/gpt-4.1", api_key=os.getenv("OPENAI_API_KEY")),
     instructions=instructions,
     tools=[read_code, edit_code],
+    use_structured_outputs_internally=True,  # Enable structured output
 )
-
-
-print(agent.run("I want to build an app that when we upload a json file, it converts it to a table"))

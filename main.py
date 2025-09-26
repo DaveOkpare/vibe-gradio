@@ -1,15 +1,12 @@
 import base64
 import gradio as gr
 
+
 # Initial inner Gradio-Lite app (editable at runtime in the UI)
-INITIAL_INNER_PY = """
-import gradio as gr
-
-def greet(name):
-    return "Hello, " + name + "!!!"
-
-gr.Interface(greet, 'textbox', 'textbox').launch()
-"""
+def load_sandbox_code():
+    """Load the current sandbox code from demo.py"""
+    with open("sandbox.py", "r") as f:
+        return f.read()
 
 
 def build_srcdoc(py_code: str) -> str:
@@ -50,7 +47,7 @@ def chat(message, history):
 
 with gr.Blocks() as demo:
     frame = gr.HTML(
-        make_iframe_html(INITIAL_INNER_PY),
+        make_iframe_html(load_sandbox_code()),
         render=False,
     )
     with gr.Row():
@@ -66,4 +63,5 @@ with gr.Blocks() as demo:
             gr.Markdown("<center><h1>Preview</h1></center>")
             frame.render()
 
-demo.launch()
+if __name__ == "__main__":
+    demo.launch()

@@ -41,13 +41,9 @@ def make_iframe_html(py_code: str, height: int = 650) -> str:
 
 def chat(message, history):
     if "python" in message.lower():
-        return "Type Python or JavaScript to see the code.", gr.Code(
-            language="python", value=python_code
-        )
+        return "Type Python or JavaScript to see the code."
     elif "javascript" in message.lower():
-        return "Type Python or JavaScript to see the code.", gr.Code(
-            language="javascript", value=js_code
-        )
+        return "Type Python or JavaScript to see the code."
     else:
         return "Please ask about Python or JavaScript.", None
 

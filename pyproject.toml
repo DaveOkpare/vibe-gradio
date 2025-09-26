@@ -6,5 +6,5 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "gradio>=5.47.1",
-    "smolagents>=1.22.0",
+    "smolagents[litellm]>=1.22.0",
 ]

@@ -1,4 +1,5 @@
 import os
+import time
 from smolagents import CodeAgent, LiteLLMModel, tool
 
 from phoenix.otel import register
@@ -18,6 +19,7 @@ that creates Gradio interfaces optimized for Gradio-Lite.
 Key Guidelines:
 - ONLY use Gradio components and functionality - no other UI frameworks
 - Always call read_code() first to understand the current application state
+- Use the think() tool to plan and reflect before implementing any features
 - Use edit_code() to make precise modifications to the existing Gradio app
 - Focus on creating intuitive, functional Gradio interfaces using gr.Interface, gr.Blocks, and
 various input/output components
@@ -28,6 +30,21 @@ gr.Textbox, gr.Button, gr.Image, gr.Audio, gr.Video, gr.Dataframe, etc.
 - Pay attention to the success/error messages from edit_code() and adjust accordingly if
 replacements fail
 - When debugging, analyze the full error trace to identify the root cause and plan the necessary fixes before calling edit_code; perform the required updates in one pass whenever possible to avoid repeated retries
+
+Systematic Planning and Component-Based Thinking:
+- ALWAYS use the think() tool before implementing any new feature or modification
+- Break down user requests into specific Gradio components and their relationships
+- Think through the complete user experience flow from input to output
+- Consider component layout using gr.Blocks, gr.Row, gr.Column for proper organization
+- Plan event handlers and data flow between components before coding
+- Examples of component mapping:
+  * Image Gallery Viewer → gr.Gallery + gr.File (upload) + gr.Button (navigation)
+  * Calculator → gr.Textbox (display) + grid of gr.Button components + gr.Row/gr.Column layout
+  * Data Converter → gr.File (input) + gr.JSON (preview) + gr.Dataframe (output)
+  * Chat Interface → gr.Chatbot + gr.Textbox (input) + gr.Button (send)
+  * Form Builder → gr.Textbox, gr.Dropdown, gr.Checkbox, gr.Slider + gr.Button (submit)
+- Reflect on implementation strategy: component selection, layout design, event handling
+- Use the think() tool to course-correct if initial approaches don't work as expected
 
 Error Analysis Protocol:
 - When encountering errors, FIRST understand the complete context before making any changes
@@ -66,7 +83,91 @@ CRITICAL Gradio-Lite (Pyodide) File Handling:
 Your goal is to transform user requests into working Gradio applications that demonstrate the
 requested functionality. Be creative with Gradio's extensive component library to build engaging,
 interactive web interfaces that work reliably in the Gradio-Lite environment.
+
+MANDATORY Documentation and Reference Guidelines:
+- NEVER rely on your internal knowledge for component implementation details
+- ALWAYS use Gradio MCP documentation tools for ALL component implementations
+- BEFORE implementing ANY Gradio component, you MUST query the Gradio documentation via MCP
+- You have access to these specific MCP tools:
+  * gradio_docs_mcp_search_gradio_docs: Search for specific component documentation
+  * gradio_docs_mcp_load_gradio_docs: Load comprehensive Gradio documentation
+- For EVERY component you use, search the Gradio MCP for:
+  * Current API parameters and their exact syntax
+  * Latest usage examples and patterns
+  * Current best practices and recommendations
+  * Compatibility information with current Gradio version
+- NEVER assume parameter names, methods, or syntax from memory
+- ALWAYS verify component behavior through Gradio MCP tools before implementation
+- If MCP tools are not available, explicitly inform the user that current documentation cannot be accessed
+- The Gradio MCP provides the ONLY reliable source for current, accurate Gradio documentation
+- Your internal knowledge may be outdated - Gradio MCP eliminates this risk with real-time documentation
+
+Implementation Protocol:
+1. User requests a feature
+2. Call read_code() to understand the current application state
+3. Use think() tool to:
+   - Break down the request into specific Gradio components
+   - Plan the component layout and interactions
+   - Consider the user experience flow
+   - Identify potential challenges or requirements
+4. Use gradio_docs_mcp_search_gradio_docs to find relevant component documentation
+5. Use ONLY the information retrieved from Gradio MCP for implementation
+6. Call think() again if you need to revise your approach based on documentation
+7. Implement using edit_code() with the planned component structure
+8. If unsure about any detail, query Gradio MCP again rather than guessing
+9. Use gradio_docs_mcp_load_gradio_docs for comprehensive overviews when needed
+10. Reflect with think() tool if implementation doesn't work as expected
 """
+
+# -------- Persistence config (outside project tree) --------
+SANDBOX_ROOT = os.environ.get(
+    "SANDBOX_ROOT", os.path.expanduser("~/.gradio_app_builder")
+)
+WORKSPACE = os.environ.get(
+    "SANDBOX_WORKSPACE", "default"
+)  # you can customize per user/session
+WS_DIR = os.path.join(SANDBOX_ROOT, WORKSPACE)
+CODE_PATH = os.path.join(WS_DIR, "sandbox.py")
+SNAPSHOT_DIR = os.path.join(WS_DIR, "snapshots")
+
+os.makedirs(SANDBOX_ROOT, exist_ok=True)
+os.makedirs(WS_DIR, exist_ok=True)
+os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+
+INITIAL_CODE = """\
+import gradio as gr
+
+def greet(name):
+    return "Hello, " + name + "!!!"
+
+gr.Interface(greet, 'textbox', 'textbox').launch()
+"""
+
+
+def ensure_code_exists():
+    if not os.path.exists(CODE_PATH):
+        with open(CODE_PATH, "w", encoding="utf-8") as f:
+            f.write(INITIAL_CODE)
+
+
+def read_persisted_code() -> str:
+    ensure_code_exists()
+    with open(CODE_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def atomic_write(path: str, content: str):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.replace(tmp, path)  # atomic on POSIX
+
+
+def write_persisted_code(content: str, snapshot: bool = True):
+    atomic_write(CODE_PATH, content)
+    if snapshot:
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        atomic_write(os.path.join(SNAPSHOT_DIR, f"sandbox_{ts}.py"), content)
 
 
 @tool
@@ -89,11 +190,7 @@ def read_code() -> str:
     - No parameters needed - it automatically fetches the current state
 
     """
-    # Read the current code from demo.py
-    with open("demo.py", "r") as f:
-        content = f.read()
-
-    return f"```python\n{content}\n```"
+    return f"```python\n{read_persisted_code()}\n```"
 
 
 @tool
@@ -131,28 +228,16 @@ def edit_code(old_str: str, new_str: str) -> str:
 
     """
     try:
-        # Read the current file
-        with open("demo.py", "r") as f:
-            content = f.read()
-
-        # Check if old_str exists
+        content = read_persisted_code()
         if old_str not in content:
             return "ERROR: Could not find the specified code to replace."
-
-        # Replace the code
-        new_code = content.replace(old_str, new_str)
-
-        if new_code == content:
+        updated = content.replace(old_str, new_str)
+        if updated == content:
             return "WARNING: No changes were made."
-
-        # Write back to file
-        with open("demo.py", "w") as f:
-            f.write(new_code)
-
+        write_persisted_code(updated, snapshot=True)
         return "SUCCESS: Code successfully updated."
-
     except Exception as e:
-        return f"ERROR: {str(e)}"
+        return f"ERROR: {e}"
 
 
 agent = CodeAgent(

@@ -1,8 +1,14 @@
 import os
 from smolagents import CodeAgent, LiteLLMModel, tool
 
-from main import SANDBOX_CODE
+from phoenix.otel import register
 
+# configure the Phoenix tracer
+tracer_provider = register(
+    endpoint=os.getenv("PHOENIX_ENDPOINT"),
+    project_name="gradio",  # Default is 'default'
+    auto_instrument=True,  # Auto-instrument your app based on installed OI dependencies
+)
 
 instructions = """
 Your task is to help users build and modify Gradio applications within this interactive sandbox

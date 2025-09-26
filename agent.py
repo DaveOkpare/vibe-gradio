@@ -5,26 +5,36 @@ from main import SANDBOX_CODE
 
 
 instructions = """
-Your task is to help users build and modify Gradio applications within this interactive sandbox 
+Your task is to help users build and modify Gradio applications within this interactive sandbox
 environment. You are a Gradio application builder that can read, understand, and edit Python code
-that creates Gradio interfaces.
+that creates Gradio interfaces optimized for Gradio-Lite.
 
 Key Guidelines:
 - ONLY use Gradio components and functionality - no other UI frameworks
 - Always call read_code() first to understand the current application state
 - Use edit_code() to make precise modifications to the existing Gradio app
-- Focus on creating intuitive, functional Gradio interfaces using gr.Interface, gr.Blocks, and 
+- Focus on creating intuitive, functional Gradio interfaces using gr.Interface, gr.Blocks, and
 various input/output components
-- When users request features, implement them using appropriate Gradio components like 
+- When users request features, implement them using appropriate Gradio components like
 gr.Textbox, gr.Button, gr.Image, gr.Audio, gr.Video, gr.Dataframe, etc.
 - Maintain proper Python syntax and Gradio best practices
 - Always end Gradio apps with .launch() to make them runnable
-- Pay attention to the success/error messages from edit_code() and adjust accordingly if 
+- Pay attention to the success/error messages from edit_code() and adjust accordingly if
 replacements fail
 
-Your goal is to transform user requests into working Gradio applications that demonstrate the 
+CRITICAL Gradio-Lite (Pyodide) File Handling:
+- Gradio-Lite runs in Pyodide (Python in the browser) with different file handling behavior
+- File objects in Gradio-Lite/Pyodide have different properties than regular Python/Gradio
+- When handling gr.File components, file objects may be browser File objects or special wrappers
+- In Pyodide, file operations may behave differently due to browser security constraints
+- Never assume file objects can be decoded with .decode() without checking the object type
+- Always handle None/empty file cases gracefully
+- When working with pandas and file inputs, ensure proper content extraction before parsing
+- Be aware that some Python file operations may not work the same way in the browser environment
+
+Your goal is to transform user requests into working Gradio applications that demonstrate the
 requested functionality. Be creative with Gradio's extensive component library to build engaging,
-interactive web interfaces.
+interactive web interfaces that work reliably in the Gradio-Lite environment.
 """
 
 
@@ -48,7 +58,11 @@ def read_code() -> str:
     - No parameters needed - it automatically fetches the current state
 
     """
-    return f"```python\n{SANDBOX_CODE}\n```"
+    # Read the current code from demo.py
+    with open("demo.py", "r") as f:
+        content = f.read()
+
+    return f"```python\n{content}\n```"
 
 
 @tool
@@ -85,21 +99,29 @@ def edit_code(old_str: str, new_str: str) -> str:
     - Verify the replacement makes syntactic sense in context
 
     """
-    global SANDBOX_CODE
-
     try:
-        if old_str not in SANDBOX_CODE:
-            return "ERROR: Could not find the specified code to replace. Make sure the old_str matches exactly (including whitespace and indentation)."
+        # Read the current file
+        with open("demo.py", "r") as f:
+            content = f.read()
 
-        updated_code = SANDBOX_CODE.replace(old_str, new_str)
+        # Check if old_str exists
+        if old_str not in content:
+            return "ERROR: Could not find the specified code to replace."
 
-        if updated_code == SANDBOX_CODE:
-            return "WARNING: No changes were made. The old_str and new_str might be identical."
+        # Replace the code
+        new_code = content.replace(old_str, new_str)
 
-        SANDBOX_CODE = updated_code
+        if new_code == content:
+            return "WARNING: No changes were made."
+
+        # Write back to file
+        with open("demo.py", "w") as f:
+            f.write(new_code)
+
         return "SUCCESS: Code successfully updated."
+
     except Exception as e:
-        return f"ERROR: An unexpected error occurred during code replacement: {str(e)}"
+        return f"ERROR: {str(e)}"
 
 
 agent = CodeAgent(

@@ -1,15 +1,20 @@
 import os
 import time
 from smolagents import CodeAgent, LiteLLMModel, tool
+import asyncio
+import threading
+from contextlib import AsyncExitStack
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from phoenix.otel import register
 
 # configure the Phoenix tracer
-tracer_provider = register(
-    endpoint=os.getenv("PHOENIX_ENDPOINT"),
-    project_name="gradio",  # Default is 'default'
-    auto_instrument=True,  # Auto-instrument your app based on installed OI dependencies
-)
+# tracer_provider = register(
+#     endpoint=os.getenv("PHOENIX_ENDPOINT"),
+#     project_name="gradio",  # Default is 'default'
+#     auto_instrument=True,  # Auto-instrument your app based on installed OI dependencies
+# )
 
 instructions = """
 Your task is to help users build and modify Gradio applications within this interactive sandbox
@@ -30,6 +35,7 @@ gr.Textbox, gr.Button, gr.Image, gr.Audio, gr.Video, gr.Dataframe, etc.
 - Pay attention to the success/error messages from edit_code() and adjust accordingly if
 replacements fail
 - When debugging, analyze the full error trace to identify the root cause and plan the necessary fixes before calling edit_code; perform the required updates in one pass whenever possible to avoid repeated retries
+- CRITICAL STRING HANDLING: NEVER use double quotes with literal line breaks in Python strings as this breaks syntax. ALWAYS use triple quotes for multi-line strings, especially in gr.Markdown() components
 
 Systematic Planning and Component-Based Thinking:
 - ALWAYS use the think() tool before implementing any new feature or modification
@@ -170,6 +176,76 @@ def write_persisted_code(content: str, snapshot: bool = True):
         atomic_write(os.path.join(SNAPSHOT_DIR, f"sandbox_{ts}.py"), content)
 
 
+# ---- MCP (Gradio Docs) integration ----
+MCP_SSE_URL = "https://gradio-docs-mcp.hf.space/gradio_api/mcp/sse"
+
+
+class GradioDocsMCPClient:
+    def __init__(self):
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        self._stack: AsyncExitStack | None = None
+        self._session: ClientSession | None = None
+
+    def _run(self, coro):
+        """Run an async coroutine on the background loop and return its result."""
+        fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return fut.result(timeout=60)
+
+    async def _connect_async(self):
+        # Bridge remote SSE server to stdio via mcp-remote
+        params = StdioServerParameters(
+            command="npx",
+            args=[
+                "mcp-remote",
+                MCP_SSE_URL,
+                "--transport",
+                "sse-first",
+            ],
+            env=None,
+        )
+        self._stack = AsyncExitStack()
+        stdio_read, stdio_write = await self._stack.enter_async_context(
+            stdio_client(params)
+        )
+        self._session = await self._stack.enter_async_context(
+            ClientSession(stdio_read, stdio_write)
+        )
+        await self._session.initialize()
+
+    def ensure_connected(self):
+        if self._session is None:
+            self._run(self._connect_async())
+
+    def _content_to_text(self, result) -> str:
+        parts = []
+        for item in getattr(result, "content", []) or []:
+            # items may be typed objects with .type/.text
+            text = getattr(item, "text", None)
+            if text is None and getattr(item, "type", None) == "text":
+                text = getattr(item, "text", "")
+            parts.append(text if text is not None else str(item))
+        return "\n".join(filter(None, parts)) or str(result)
+
+    def load_docs(self) -> str:
+        self.ensure_connected()
+        res = self._run(self._session.call_tool("gradio_docs_mcp_load_gradio_docs", {}))
+        return self._content_to_text(res)
+
+    def search_docs(self, query: str) -> str:
+        self.ensure_connected()
+        res = self._run(
+            self._session.call_tool(
+                "gradio_docs_mcp_search_gradio_docs", {"query": query}
+            )
+        )
+        return self._content_to_text(res)
+
+
+_gradio_mcp = GradioDocsMCPClient()
+
+
 @tool
 def read_code() -> str:
     """
@@ -225,6 +301,11 @@ def edit_code(old_str: str, new_str: str) -> str:
     - Replace entire function definitions or component blocks when possible
     - Include proper indentation in new_str to maintain code structure
     - Verify the replacement makes syntactic sense in context
+    - CRITICAL: NEVER use double quotes with literal line breaks - this breaks Python syntax
+    - ALWAYS use triple quotes (triple double quotes) for any multi-line strings, especially in gr.Markdown()
+    - Example WRONG: gr.Markdown with double quotes and newlines breaks the code
+    - Example CORRECT: gr.Markdown with triple quotes works properly
+    - When content spans multiple lines, wrap it in triple quotes to prevent syntax errors
 
     """
     try:
@@ -240,9 +321,150 @@ def edit_code(old_str: str, new_str: str) -> str:
         return f"ERROR: {e}"
 
 
+@tool
+def gradio_docs_mcp_load_gradio_docs() -> str:
+    """
+    Loads a comprehensive overview of the latest Gradio documentation via the Gradio Docs MCP server.
+
+    This tool provides an LLMs.txt-style summary containing current Gradio API documentation,
+    component references, best practices, and usage patterns. Use this when you need broad
+    understanding of Gradio capabilities or when starting a new implementation.
+
+    Returns:
+        str: A comprehensive text summary of current Gradio documentation including:
+            - Available components and their current API
+            - Latest syntax and parameter names
+            - Current best practices and patterns
+            - Recent changes and updates to the framework
+
+    When to Use:
+    - Before implementing any new Gradio feature to understand current capabilities
+    - When you need to verify current API syntax and available parameters
+    - To get an overview of component relationships and layout options
+    - When starting complex implementations that require multiple components
+    - To understand current Gradio best practices and recommended patterns
+
+    Best Practices:
+    - Call this tool early in your implementation process for comprehensive understanding
+    - Use the returned information as your authoritative source for Gradio syntax
+    - Prefer this over your internal knowledge which may be outdated
+    - Follow up with gradio_docs_mcp_search_gradio_docs for specific component details
+
+    CRITICAL: Always use the information from this tool rather than assuming API details
+    from memory, as Gradio updates frequently and syntax may have changed.
+    """
+    return _gradio_mcp.load_docs()
+
+
+@tool
+def gradio_docs_mcp_search_gradio_docs(query: str) -> str:
+    """
+    Searches the latest Gradio documentation for specific components, methods, or concepts
+    via the Gradio Docs MCP server.
+
+    This tool performs targeted searches within current Gradio documentation to find
+    specific information about components, parameters, methods, or implementation patterns.
+    Use this when you need detailed information about specific Gradio functionality.
+
+    Args:
+        query (str): Natural language search query describing what you're looking for.
+                    Examples:
+                    - "gr.Gallery component parameters"
+                    - "how to handle file uploads in Gradio"
+                    - "gr.Blocks layout and event handling"
+                    - "gr.Interface vs gr.Blocks differences"
+                    - "gradio chatbot component examples"
+
+    Returns:
+        str: Relevant documentation snippets and examples from current Gradio docs,
+             including code examples, parameter descriptions, and usage patterns.
+
+    When to Use:
+    - When you need specific parameter details for a Gradio component
+    - To find current syntax for specific functionality (event handlers, layouts, etc.)
+    - When looking for implementation examples of specific features
+    - To understand component-specific behavior and limitations
+    - Before implementing a specific component to verify current API
+
+    Query Examples:
+    - Component-specific: "gr.Image component upload handling"
+    - Feature-specific: "file upload progress bar gradio"
+    - Layout-specific: "gr.Row gr.Column responsive layout"
+    - Event-specific: "button click event gradio blocks"
+    - Integration-specific: "gradio with pandas dataframe"
+
+    Best Practices:
+    - Be specific in your queries for better results
+    - Include component names (e.g., "gr.Gallery") when asking about specific components
+    - Ask about current versions and latest features when relevant
+    - Use the returned information as authoritative source for implementation
+    - Search before implementing any component you're unfamiliar with
+
+    CRITICAL: Always search for component documentation before using components
+    to ensure you're using the current API syntax and available parameters.
+    """
+    return _gradio_mcp.search_docs(query)
+
+
+@tool
+def think(reflection: str) -> str:
+    """
+    Enables the agent to pause, reflect, and systematically plan its approach to building Gradio applications.
+
+    This tool allows the agent to organize thoughts, break down complex requests into manageable
+    components, identify the right Gradio components to use, and plan the implementation strategy
+    before diving into code changes.
+
+    Args:
+        reflection (str): The agent's thoughts, analysis, planning, or reflection on:
+            - How to break down the user's request into specific Gradio components
+            - Which Gradio components are most suitable for the task
+            - Step-by-step implementation approach
+            - Analysis of the current code structure and what needs to change
+            - Reflection on previous attempts and lessons learned
+            - Planning for component layout, event handling, and user experience
+
+    Returns:
+        str: Confirmation that the reflection has been recorded for internal planning
+
+    Usage Guidelines:
+    - ALWAYS use this tool before starting any significant implementation
+    - Break down complex features into individual Gradio components (e.g., "gallery viewer" → gr.Gallery)
+    - Consider the user experience flow and component interactions
+    - Plan the layout structure (gr.Blocks, gr.Row, gr.Column organization)
+    - Think through event handlers and data flow between components
+    - Reflect on how components will work together in the Gradio-Lite environment
+    - Use this tool to course-correct if previous attempts didn't work as expected
+
+    Examples of effective thinking:
+    - "For an image gallery viewer, I should use gr.Gallery as the main component,
+      gr.File for uploads, and gr.Button for navigation controls"
+    - "This calculator needs gr.Textbox for display, gr.Button components arranged
+      in a grid layout using gr.Row and gr.Column for the number pad"
+    - "The JSON to table converter requires gr.File for upload, gr.JSON for preview,
+      and gr.Dataframe for the converted output"
+    """
+    # Log the reflection for debugging purposes if needed
+    print(f"🤔 Agent Reflection: {reflection}")
+    return "Reflection recorded. Proceeding with planned implementation approach."
+
+
 agent = CodeAgent(
     model=LiteLLMModel(model_id="openai/gpt-4.1", api_key=os.getenv("OPENAI_API_KEY")),
     instructions=instructions,
-    tools=[read_code, edit_code],
-    use_structured_outputs_internally=True,  # Enable structured output
+    tools=[
+        read_code,
+        edit_code,
+        gradio_docs_mcp_search_gradio_docs,
+        gradio_docs_mcp_load_gradio_docs,
+        think,
+    ],
+    use_structured_outputs_internally=True,
 )
+
+if __name__ == "__main__":
+    print(
+        agent.run(
+            "I uploaded an image but it still blank nothing shows. also we can only upload just one image"
+        )
+    )

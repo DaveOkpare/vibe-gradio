@@ -1,6 +1,8 @@
 import base64
 import gradio as gr
 
+from agent import agent, read_persisted_code
+
 
 # Initial inner Gradio-Lite app (editable at runtime in the UI)
 def load_sandbox_code():
@@ -37,31 +39,38 @@ def make_iframe_html(py_code: str, height: int = 650) -> str:
 
 
 def chat(message, history):
-    if "python" in message.lower():
-        return "Type Python or JavaScript to see the code."
-    elif "javascript" in message.lower():
-        return "Type Python or JavaScript to see the code."
-    else:
-        return "Please ask about Python or JavaScript.", gr.update()
+    try:
+        response = agent.run(message)
+        html = make_iframe_html(read_persisted_code())
+        return response, html
+    except Exception as e:
+        return f"Error: {e}", gr.update()
 
 
 with gr.Blocks() as demo:
-    frame = gr.HTML(
-        make_iframe_html(load_sandbox_code()),
-        render=False,
-    )
     with gr.Row():
-        with gr.Column():
-            gr.Markdown("<center><h1>Chat</h1></center>")
-            gr.ChatInterface(
-                chat,
-                examples=["Build a chat interface", "Build a gallery"],
-                additional_outputs=[frame],
-                type="messages",
-            )
-        with gr.Column():
-            gr.Markdown("<center><h1>Preview</h1></center>")
-            frame.render()
+        left = gr.Column(scale=1)
+        right = gr.Column(scale=1)
+
+    with right:
+        gr.Markdown("<center><h1>Preview</h1></center>")
+        frame = gr.HTML()
+    with left:
+        gr.Markdown("<center><h1>Chat</h1></center>")
+        gr.ChatInterface(
+            chat,
+            examples=[
+                "Build a simple calculator app",
+                "Create a JSON to table converter",
+                "Make an image gallery viewer",
+            ],
+            additional_outputs=[frame],
+            type="messages",
+        )
+
+    demo.load(lambda: make_iframe_html(read_persisted_code()), outputs=frame)
+
+    demo.queue()
 
 if __name__ == "__main__":
     demo.launch()
